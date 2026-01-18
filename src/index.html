@@ -263,14 +263,14 @@
         <li>• Red cells = 1, White cells = 0</li>
         <li>• Click "Send to Arduino" to transmit the matrix</li>
         <li>• Connection stays open - you can send multiple times</li>
-        <li>• Matrix size: 8 rows × 100 columns</li>
+        <li>• Matrix size: 15 rows × 50 columns</li>
       </ul>
     </div>
   </div>
 
   <script>
-    const ROWS = 8;
-    const COLS = 100;
+    const ROWS = 15;
+    const COLS = 50;
     let matrix = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
     let isDrawing = false;
     let drawMode = 1;
