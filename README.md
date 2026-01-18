@@ -1,20 +1,3 @@
-# POV Spin Project
-
-This is a PlatformIO project for a spinning LED display (Persistence Of View effect). We are implementing old technology with a new spin
-
-## Project structure
-
-- `src/` → main code
-- `include/` → headers
-- `lib/` → external libraries
-- `test/` → test code
-
-## How to build and upload
-
-1. Open PlatformIO in VS Code
-2. Connect your board
-3. Run **Upload** or `pio run --target upload`
-
 # Dynamic Polar Renderer
 
 Dynamic Polar Renderer is a PlatformIO-based ESP32 project for rendering images and patterns using **polar coordinates** on a spinning LED Persistence of Vision (POV) display. The renderer converts angular position and radius into time-synchronized LED output, enabling smooth, dynamic visuals as the display rotates.
