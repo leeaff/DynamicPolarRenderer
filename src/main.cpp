@@ -1,246 +1,294 @@
-#include <Arduino.h>
-#include "driver/pcnt.h"
-#include <math.h>
-
-// Binary output pins (these go to your external LED decoder circuit)
-#define OUTPUT_BIT0 8   // Change to your actual output pins
-#define OUTPUT_BIT1 7   // Change to your actual output pins
-#define OUTPUT_BIT2 5   // Third bit for 8 LEDs
-
-// Encoder Pins
-#define ENC_A 32
-#define ENC_B 33
-#define CPR 2400
-#define PCNT_UNIT_USED PCNT_UNIT_0
-
-// POV Display Configuration
-#define NUM_LEDS 8  // Your external circuit controls 8 LEDs (3 bits = 2^3 = 8)
-#define NUM_COLUMNS 100  // Number of angular positions (1 degree resolution)
-#define COLUMN_DURATION_US 500  // Time to display each column in microseconds
-
-// Display matrix: 8 rows (LEDs) × NUM_COLUMNS
-// matrix[row][column] where row = LED number (0-7), column = angle position (0-359)
-bool displayMatrix[NUM_LEDS][NUM_COLUMNS];
-
-int16_t lastCount = 0;
-unsigned long lastTime = 0;
-
-void setupEncoder() {
-  pcnt_config_t pcnt_config = {
-    .pulse_gpio_num = ENC_A,
-    .ctrl_gpio_num  = ENC_B,
-    .lctrl_mode     = PCNT_MODE_REVERSE,
-    .hctrl_mode     = PCNT_MODE_KEEP,
-    .pos_mode       = PCNT_COUNT_INC,
-    .neg_mode       = PCNT_COUNT_DEC,
-    .counter_h_lim  = 32767,
-    .counter_l_lim  = -32768,
-    .unit           = PCNT_UNIT_USED,
-    .channel        = PCNT_CHANNEL_0
-  };
-  
-  pcnt_unit_config(&pcnt_config);
-  pcnt_counter_pause(PCNT_UNIT_USED);
-  pcnt_counter_clear(PCNT_UNIT_USED);
-  pcnt_counter_resume(PCNT_UNIT_USED);
-}
-
-// Set the display matrix from input
-// inputMatrix: 8 rows × NUM_COLUMNS array
-void setDisplayMatrix(bool inputMatrix[NUM_LEDS][NUM_COLUMNS]) {
-  for (int row = 0; row < NUM_LEDS; row++) {
-    for (int col = 0; col < NUM_COLUMNS; col++) {
-      displayMatrix[row][col] = inputMatrix[row][col];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Matrix Editor for Arduino</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
-  }
-}
 
-// Output 3-bit value to control which LED is on
-// ledNumber: 0-7 (which of the 8 LEDs to turn on)
-void outputBinaryValue(uint8_t ledNumber) {
-  if (ledNumber > 7) ledNumber = 0;
-  
-  // Extract bit 0, bit 1, and bit 2
-  bool bit0 = ledNumber & 0x01;        // Least significant bit
-  bool bit1 = (ledNumber & 0x02) >> 1; // Middle bit
-  bool bit2 = (ledNumber & 0x04) >> 2; // Most significant bit
-  
-  // Output to pins
-  digitalWrite(OUTPUT_BIT0, bit0);
-  digitalWrite(OUTPUT_BIT1, bit1);
-  digitalWrite(OUTPUT_BIT2, bit2);
-}
+    body {
+      min-height: 100vh;
+      /* background: linear-gradient(135deg, #1e293b 0%, #7e22ce 50%, #1e293b 100%); */
+      background: #213159;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 2rem;
+      user-select: none;
+    }
 
-// Display one column using multiplexing
-// columnIndex: which column (0 to NUM_COLUMNS-1)
-// durationUs: how long to display this column in microseconds
-void displayColumn(int columnIndex, unsigned long durationUs) {
-  if (columnIndex < 0 || columnIndex >= NUM_COLUMNS) return;
-  
-  unsigned long startMicros = micros();
-  unsigned long endMicros = startMicros + durationUs;
-  
-  // Calculate how many iterations we can do
-  // We want to cycle through all 8 LEDs multiple times for persistence of vision
-  int iterationsPerLED = max(1, (int)(durationUs / (NUM_LEDS * 10))); // ~10us per LED minimum
-  
-  while (micros() < endMicros) {
-    // Cycle through all 8 LEDs
-    for (int led = 0; led < NUM_LEDS; led++) {
-      if (displayMatrix[led][columnIndex]) {
-        // This LED should be ON at this column
-        outputBinaryValue(led);
-        delayMicroseconds(10); // Brief pulse
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      color: white;
+      margin-bottom: 0.5rem;
+      font-weight: bold;
+    }
+
+    .subtitle {
+      color: #e9d5ff;
+      font-size: 1.1rem;
+    }
+
+    .matrix-container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .matrix {
+      display: inline-block;
+      cursor: crosshair;
+    }
+
+    .matrix-row {
+      display: flex;
+      line-height: 0;
+    }
+
+    .cell {
+      width: 12px;
+      height: 12px;
+      background-color: white;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: background-color 75ms;
+      cursor: pointer;
+    }
+
+    .cell.active {
+      background-color: #ef4444;
+    }
+
+    .controls {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    button {
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 1rem 2rem;
+      border-radius: 0.75rem;
+      border: none;
+      cursor: pointer;
+      transition: all 200ms;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    button:hover {
+      transform: scale(1.05);
+    }
+
+    .send-btn {
+      background: linear-gradient(135deg, #a855f7 0%, #ec4899 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .send-btn:hover {
+      background: linear-gradient(135deg, #9333ea 0%, #db2777 100%);
+    }
+
+    .clear-btn {
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .clear-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .instructions {
+      margin-top: 2rem;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .instructions h3 {
+      color: white;
+      margin-bottom: 1rem;
+      font-size: 1.2rem;
+    }
+
+    .instructions ul {
+      list-style: none;
+      color: #e9d5ff;
+    }
+
+    .instructions li {
+      margin-bottom: 0.5rem;
+      font-size: 0.95rem;
+    }
+
+    .icon {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Matrix Editor</h1>
+      <p class="subtitle">Click and drag to draw your pattern</p>
+    </div>
+
+    <div class="matrix-container">
+      <div id="matrix" class="matrix"></div>
+    </div>
+
+    <div class="controls">
+      <button class="send-btn" onclick="sendToArduino()">
+        <svg class="icon" viewBox="0 0 24 24">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Send to Arduino
+      </button>
+      <button class="clear-btn" onclick="clearMatrix()">Clear All</button>
+    </div>
+
+    <div class="instructions">
+      <h3>Instructions:</h3>
+      <ul>
+        <li>• Click and drag across cells to draw your pattern</li>
+        <li>• Red cells = 1, White cells = 0</li>
+        <li>• Click "Send to Arduino" to transmit via Serial (or copy to clipboard)</li>
+        <li>• Matrix size: 8 rows × 100 columns</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const ROWS = 8;
+    const COLS = 100;
+    let matrix = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+    let isDrawing = false;
+    let drawMode = 1;
+
+    // Create matrix grid
+    const matrixEl = document.getElementById('matrix');
+    const cells = [];
+
+    for (let r = 0; r < ROWS; r++) {
+      const row = document.createElement('div');
+      row.className = 'matrix-row';
+      cells[r] = [];
+      
+      for (let c = 0; c < COLS; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.row = r;
+        cell.dataset.col = c;
+        
+        cell.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          handleMouseDown(r, c);
+        });
+        
+        cell.addEventListener('mouseenter', () => {
+          handleMouseEnter(r, c);
+        });
+        
+        row.appendChild(cell);
+        cells[r][c] = cell;
       }
       
-      // Check if time is up
-      if (micros() >= endMicros) break;
+      matrixEl.appendChild(row);
     }
-  }
-  
-  // Turn off all LEDs after column display
-  outputBinaryValue(0);
-  digitalWrite(OUTPUT_BIT0, LOW);
-  digitalWrite(OUTPUT_BIT1, LOW);
-  digitalWrite(OUTPUT_BIT2, LOW);
-}
 
-float getCurrentAngle() {
-  int16_t count = 0;
-  pcnt_get_counter_value(PCNT_UNIT_USED, &count);
-  
-  count = (int16_t)(count * 5.911);  // Apply your calibration factor
-  
-  float angle = fmod((float)count, (float)CPR) * (360.0 / CPR);
-  if (angle < 0) angle += 360.0;
-  
-  return angle;
-}
+    document.addEventListener('mouseup', () => {
+      isDrawing = false;
+    });
 
-void setup() {
-  Serial.begin(9600);
-  delay(1000);
-  
-  // Setup binary output pins
-  pinMode(OUTPUT_BIT0, OUTPUT);
-  pinMode(OUTPUT_BIT1, OUTPUT);
-  pinMode(OUTPUT_BIT2, OUTPUT);
-  digitalWrite(OUTPUT_BIT0, LOW);
-  digitalWrite(OUTPUT_BIT1, LOW);
-  digitalWrite(OUTPUT_BIT2, LOW);
-  
-  // Setup encoder
-  pinMode(ENC_A, INPUT_PULLUP);
-  pinMode(ENC_B, INPUT_PULLUP);
-  setupEncoder();
-  
-  // Initialize display matrix to all off
-  for (int row = 0; row < NUM_LEDS; row++) {
-    for (int col = 0; col < NUM_COLUMNS; col++) {
-      displayMatrix[row][col] = false;
+    function handleMouseDown(row, col) {
+      isDrawing = true;
+      drawMode = matrix[row][col] === 0 ? 1 : 0;
+      toggleCell(row, col, drawMode);
     }
-  }
-  
-  // Example: Create a test pattern matrix and load it
-  bool myPattern[NUM_LEDS][NUM_COLUMNS];
-  
 
-  // Initialize to all off
-  for (int row = 0; row < NUM_LEDS; row++) {
-    for (int col = 0; col < NUM_COLUMNS; col++) {
-      myPattern[row][col] = false;
-    }
-  }
-
-  // Set your pattern - example: LED 0 and LED 3 on from 0-180°
-  for (int col = 0; col < 100; col++) {
-    myPattern[0][col] = true;  // LED 0 ON
-    myPattern[1][col] = false;  // LED 0 ON
-    myPattern[2][col] = true;  // LED 0 ON
-    myPattern[3][col] = false;  // LED 0 ON
-  }
-
-  // Load it into the display
-  setDisplayMatrix(myPattern);
-    
-  lastTime = millis();
-  Serial.println("POV Display Ready - Motor should be spinning at ~5 Hz");
-  Serial.println("Using 8 LEDs with 3 output bits");
-  Serial.println("Output pins: BIT0=" + String(OUTPUT_BIT0) + ", BIT1=" + String(OUTPUT_BIT1) + ", BIT2=" + String(OUTPUT_BIT2));
-}
-
-void loop() {
-  if (Serial.available()) {
-    Serial.println("Receiving matrix data...");
-
-    bool newPattern[NUM_LEDS][NUM_COLUMNS] = { false };
-
-    // // Initialize pattern to all false
-    // for (int r = 0; r < NUM_LEDS; r++) {
-    //   for (int c = 0; c < NUM_COLUMNS; c++) {
-    //     newPattern[r][c] = false;
-    //   }
-    // }
-
-    int rowsReceived = 0;
-
-    while (rowsReceived < NUM_LEDS) {
-      unsigned long startWait = millis();
-      while (!Serial.available() && (millis() - startWait) < 1000) {
-        delay(10);
+    function handleMouseEnter(row, col) {
+      if (isDrawing) {
+        toggleCell(row, col, drawMode);
       }
+    }
 
-      if (!Serial.available()) {
-        Serial.println("Timeout waiting for data");
-        break;
+    function toggleCell(row, col, value) {
+      matrix[row][col] = value;
+      if (value === 1) {
+        cells[row][col].classList.add('active');
+      } else {
+        cells[row][col].classList.remove('active');
       }
+    }
 
-      String rowData = Serial.readStringUntil('\n');
-      rowData.trim();
-      if (rowData.length() == 0) continue;
+    async function sendToArduino() {
+      const matrixString = matrix.map(row => row.join(',')).join('\n');
+      
+      try {
+        if ('serial' in navigator) {
+          const port = await navigator.serial.requestPort();
+          await port.open({ baudRate: 9600 });
+          
+          const encoder = new TextEncoder();
+          const writer = port.writable.getWriter();
+          
+          await writer.write(encoder.encode(matrixString + '\n'));
+          
+          await writer.releaseLock();
+        //   await port.close();
+          
+          alert('Matrix sent to Arduino successfully!');
+          console.log(matrixString);
+        } else {
+          throw new Error('Web Serial API not supported');
+        }
+      } catch (error) {
+        navigator.clipboard.writeText(matrixString);
+        alert('Serial connection not available. Matrix data copied to clipboard!\n\nYou can paste this into the Arduino Serial Monitor.');
+      }
+    }
 
-      Serial.print("Row ");
-      Serial.print(rowsReceived);
-      Serial.print(": ");
-      Serial.println(rowData);
-
-      int col = 0;
-      int start = 0;
-
-      for (int i = 0; i <= rowData.length(); i++) {
-        if (i == rowData.length() || rowData[i] == ',') {
-          int bit = rowData.substring(start, i).toInt();
-          if (col < NUM_COLUMNS) {
-            newPattern[rowsReceived][col] = (bit == 1);
-          }
-          col++;
-          start = i + 1;
+    function clearMatrix() {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          matrix[r][c] = 0;
+          cells[r][c].classList.remove('active');
         }
       }
-
-      rowsReceived++;
     }
-
-    setDisplayMatrix(newPattern);
-  }
-  // Get current angle
-  float angle = getCurrentAngle();
-  
-  // Convert angle to column index (0 to NUM_COLUMNS-1)
-  int columnIndex = (int)angle;
-  if (columnIndex >= NUM_COLUMNS) columnIndex = NUM_COLUMNS - 1;
-  
-  // Display the current column
-  displayColumn(columnIndex, COLUMN_DURATION_US);
-  
-  // Debug output (uncomment to see status)
-  // static unsigned long lastPrint = 0;
-  // if (millis() - lastPrint > 500) {
-  //   Serial.print("Angle: ");
-  //   Serial.print(angle, 1);
-  //   Serial.print("° | Column: ");
-  //   Serial.println(columnIndex);
-  //   lastPrint = millis();
-  // }
-}
-
+  </script>
+</body>
+</html>
