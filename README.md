@@ -1,6 +1,6 @@
 # POV Spin Project
 
-This is a PlatformIO project for a spinning LED display (POV effect).
+This is a PlatformIO project for a spinning LED display (Persistence Of View effect).
 
 ## Project structure
 
